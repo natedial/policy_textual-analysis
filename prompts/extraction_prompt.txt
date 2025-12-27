@@ -1,0 +1,86 @@
+You are an expert analyst of Federal Reserve communications. Your task is to extract a structured semantic fingerprint from a Fed speech.
+
+Analyze the speech below and extract information about the following themes. For each theme that is discussed in the speech, provide:
+
+1. STANCE: How does the speaker characterize current conditions?
+   - Options: very_concerned, concerned, neutral, optimistic, very_optimistic
+
+2. TRAJECTORY: Does the speaker see improvement, deterioration, or stability?
+   - Options: worsening, stable_negative, stable, improving, improving_rapidly
+
+3. EMPHASIS_SCORE: How much of the speech is devoted to this topic? (1-10 scale)
+
+4. HEDGING_LEVEL: How much qualifying/hedging language is used?
+   - Options: none, light, moderate, heavy
+
+5. KEY_HEDGES: List specific qualifier words used (e.g., "somewhat", "largely", "appears to", "may")
+
+6. CONFIDENCE: Speaker's confidence level about this theme
+   - Options: high, moderate, low, uncertain
+
+7. KEY_PASSAGES: Extract 2-3 direct quotes that best represent the speaker's view on this theme
+
+8. POLICY_IMPLICATION: What does this suggest about policy preferences?
+   - For overall speech only
+
+**Themes to analyze:**
+- INFLATION (overall price levels, trajectory, causes)
+- LABOR_MARKETS (employment, wages, labor supply/demand)
+- HOUSING (housing costs, shelter inflation, real estate)
+- FINANCIAL_CONDITIONS (credit, financial stability, banking)
+- CONSUMER_SPENDING (consumption, consumer confidence)
+- GROWTH_OUTLOOK (GDP, economic activity, recession risks)
+- POLICY_STANCE (current policy, rate path, balance sheet)
+- GLOBAL_FACTORS (international economy, trade, geopolitical)
+
+**Important Instructions:**
+- Only include themes that are actually discussed in the speech
+- If a theme is not mentioned or only tangentially referenced, omit it entirely
+- Use direct quotes from the speech for KEY_PASSAGES
+- Be precise about hedging language - this is critical for Fed communications
+- For POLICY_IMPLICATION, assess: hawkish (favors tightening), neutral, dovish (favors easing)
+
+**EMPHASIS_SCORE Guidelines:**
+- 1-2: Mentioned in passing (1-2 sentences total)
+- 3-4: Brief discussion (approximately 1 paragraph)
+- 5-6: Moderate discussion (2-3 paragraphs or recurring mentions)
+- 7-8: Major focus (multiple paragraphs, central to a section)
+- 9-10: Dominant topic (primary subject of the speech)
+
+**HEDGING_LEVEL Guidelines:**
+- none: Definitive statements only ("is", "will", "has")
+- light: Occasional qualifiers (1-2 hedging words per topic area)
+- moderate: Regular use of qualifiers ("somewhat", "appears to", "generally")
+- heavy: Frequent uncertainty language ("may", "could", "might", "possibly", "uncertain")
+
+**THEME INCLUSION THRESHOLD:**
+- Require at least 2-3 sentences of substantive discussion to include a theme
+- If uncertain whether to include a theme, ERR ON THE SIDE OF EXCLUSION
+- Passing mentions or single-sentence references should be omitted
+- The theme must be analyzed or discussed, not merely mentioned
+
+Return your analysis as a JSON object with this structure:
+{{
+  "themes": {{
+    "INFLATION": {{
+      "stance": "concerned",
+      "trajectory": "moderating",
+      "emphasis_score": 7,
+      "hedging_level": "moderate",
+      "key_hedges": ["somewhat", "appears to"],
+      "confidence": "moderate",
+      "key_passages": ["quote 1", "quote 2"]
+    }},
+    // ... other themes only if discussed
+  }},
+  "policy_implications": {{
+    "direction": "neutral_hawkish",
+    "intensity": 6,
+    "conditionality": "Brief description of conditions mentioned"
+  }},
+  "overall_tone": "Brief characterization of overall speech tone"
+}}
+
+Speech to analyze:
+
+{speech_text}
