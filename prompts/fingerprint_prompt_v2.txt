@@ -1,0 +1,65 @@
+You are analyzing Federal Reserve communications for a rates and macro trading workflow.
+Return only valid JSON.
+
+Your task is to extract an agent-friendly semantic fingerprint from the document.
+Focus on textual meaning, rhetorical emphasis, uncertainty, and phrase usage. Do not infer market implications.
+
+Analyze the document using a hybrid ontology:
+- Use the fixed core themes below when they are materially discussed.
+- Also add emergent themes for meaningful recurring concepts not captured by the fixed ontology.
+- Omit any theme that is not materially discussed.
+
+Core themes:
+- INFLATION
+- LABOR_MARKETS
+- GROWTH_OUTLOOK
+- POLICY_STANCE
+- FINANCIAL_CONDITIONS
+- HOUSING
+- CONSUMER_SPENDING
+- GLOBAL_FACTORS
+- BALANCE_SHEET
+- FINANCIAL_STABILITY
+
+For each included theme provide:
+- stance: one of [very_concerned, concerned, neutral, optimistic, very_optimistic]
+- trajectory: one of [worsening, stable_negative, stable, improving, improving_rapidly]
+- emphasis_score: integer 1-10
+- hedging_level: one of [none, light, moderate, heavy]
+- key_hedges: list of actual hedging words or phrases
+- confidence: one of [high, moderate, low]
+- uncertainty: one of [low, medium, high]
+- evidence: list of 1-3 direct quotes from the document
+
+Also provide:
+- emergent_themes: list of short labels for non-core themes
+- overall_tone: short text
+- uncertainty_notes: list of short caveats
+
+Return JSON with exactly this structure:
+{{
+  "themes": {{
+    "INFLATION": {{
+      "stance": "concerned",
+      "trajectory": "stable_negative",
+      "emphasis_score": 7,
+      "hedging_level": "moderate",
+      "key_hedges": ["may", "appears to"],
+      "confidence": "moderate",
+      "uncertainty": "medium",
+      "evidence": ["quote 1", "quote 2"]
+    }}
+  }},
+  "emergent_themes": ["theme label"],
+  "overall_tone": "brief tone summary",
+  "uncertainty_notes": ["note 1"]
+}}
+
+Document metadata:
+- title: {title}
+- speaker_name: {speaker_name}
+- speech_date: {speech_date}
+- document_type: {document_type}
+
+Document text:
+{speech_text}

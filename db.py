@@ -1,326 +1,429 @@
-"""
-Database integration for Fed Textual Change Tracker.
-Handles all interactions with Supabase/PostgreSQL.
-"""
+"""Database client for the V1 Fed textual change tracker schema."""
+
+from __future__ import annotations
 
 import os
-from typing import Optional, List, Dict, Any
-from datetime import datetime, date
-from supabase import create_client, Client
+import re
+from datetime import date, timedelta
+from typing import Any, Dict, Iterable, List, Optional
+
 from dotenv import load_dotenv
+from supabase import Client, create_client
+
+from fed_tracker.models import AnalysisRun, ComparisonResult, NormalizedDocument, SemanticFingerprint
 
 load_dotenv()
 
 
 class Database:
-    """Database client for Fed speech tracking."""
-
-    def __init__(self, supabase_url: str = None, supabase_key: str = None):
-        """
-        Initialize database connection.
-
-        Args:
-            supabase_url: Supabase project URL (defaults to env var)
-            supabase_key: Supabase anon key (defaults to env var)
-        """
+    def __init__(self, supabase_url: str | None = None, supabase_key: str | None = None):
         self.url = supabase_url or os.getenv("SUPABASE_URL")
         self.key = supabase_key or os.getenv("SUPABASE_KEY")
-
         if not self.url or not self.key:
-            raise ValueError(
-                "SUPABASE_URL and SUPABASE_KEY must be set in environment or passed to constructor"
-            )
-
+            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
         self.client: Client = create_client(self.url, self.key)
 
-    # =========================================================================
-    # SPEAKERS
-    # =========================================================================
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
 
-    def get_or_create_speaker(self, name: str, title: str = None, institution: str = None) -> int:
-        """
-        Get speaker ID, creating if doesn't exist.
+    def _speaker_key(self, name: str) -> str:
+        key = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+        return key or "unknown_speaker"
 
-        Args:
-            name: Speaker full name
-            title: Title (e.g., "Chair")
-            institution: Institution (e.g., "Board of Governors")
-
-        Returns:
-            Speaker ID
-        """
-        # Try to find existing
-        result = self.client.table("speakers").select("id").eq("name", name).execute()
-
-        if result.data:
-            return result.data[0]["id"]
-
-        # Create new
-        result = self.client.table("speakers").insert({
-            "name": name,
-            "title": title,
-            "institution": institution
-        }).execute()
-
-        return result.data[0]["id"]
-
-    # =========================================================================
-    # SPEECHES
-    # =========================================================================
-
-    def speech_exists(self, url: str) -> bool:
-        """Check if speech URL already in database."""
-        result = self.client.table("speeches").select("id").eq("url", url).execute()
-        return len(result.data) > 0
-
-    def insert_speech(
-        self,
-        url: str,
-        speaker_name: str,
-        speech_date: date,
-        raw_text: str,
-        title: str = None,
-        speech_type: str = None,
-        source: str = None,
-        content_type: str = "html"
-    ) -> int:
-        """
-        Insert a new speech.
-
-        Args:
-            url: Speech URL
-            speaker_name: Full name of speaker
-            speech_date: Date of speech
-            raw_text: Cleaned speech text
-            title: Speech title
-            speech_type: Type (speech/statement/press_conference/interview)
-            source: Source (e.g., "Board of Governors")
-            content_type: html or pdf
-
-        Returns:
-            Speech ID
-        """
-        # Get or create speaker
-        speaker_id = self.get_or_create_speaker(speaker_name)
-
-        # Calculate word count
-        word_count = len(raw_text.split())
-
-        # Insert speech
-        result = self.client.table("speeches").insert({
-            "url": url,
-            "speaker_id": speaker_id,
-            "speaker_name": speaker_name,
-            "title": title,
-            "speech_date": speech_date.isoformat(),
-            "speech_type": speech_type,
-            "source": source,
-            "content_type": content_type,
-            "raw_text": raw_text,
-            "word_count": word_count
-        }).execute()
-
-        return result.data[0]["id"]
-
-    def get_speech(self, speech_id: int) -> Optional[Dict[str, Any]]:
-        """Get speech by ID."""
-        result = self.client.table("speeches").select("*").eq("id", speech_id).execute()
+    def _select_one(self, table: str, **filters: Any) -> Optional[Dict[str, Any]]:
+        query = self.client.table(table).select("*")
+        for field, value in filters.items():
+            query = query.eq(field, value)
+        result = query.limit(1).execute()
         return result.data[0] if result.data else None
 
-    def get_speeches_by_speaker(
+    # ---------------------------------------------------------------------
+    # Speakers
+    # ---------------------------------------------------------------------
+
+    def get_or_create_speaker(
+        self,
+        name: str,
+        title: str | None = None,
+        institution: str | None = None,
+        is_fomc_member: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        speaker_key = self._speaker_key(name)
+        existing = self._select_one("speakers", speaker_key=speaker_key)
+        if existing:
+            return existing["id"]
+
+        result = self.client.table("speakers").insert(
+            {
+                "speaker_key": speaker_key,
+                "name": name,
+                "title": title,
+                "institution": institution,
+                "is_fomc_member": is_fomc_member,
+                "metadata": metadata or {},
+            }
+        ).execute()
+        return result.data[0]["id"]
+
+    # ---------------------------------------------------------------------
+    # Documents
+    # ---------------------------------------------------------------------
+
+    def insert_source_document(
+        self,
+        source_url: str | None,
+        source_type: str,
+        content_type: str,
+        source_hash: str,
+        raw_content: str | None = None,
+        raw_markdown: str | None = None,
+        fetch_metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        existing = self._select_one("source_documents", source_hash=source_hash)
+        if existing:
+            return existing["id"]
+
+        result = self.client.table("source_documents").insert(
+            {
+                "source_url": source_url,
+                "source_type": source_type,
+                "content_type": content_type,
+                "raw_content": raw_content,
+                "raw_markdown": raw_markdown,
+                "source_hash": source_hash,
+                "fetch_metadata": fetch_metadata or {},
+            }
+        ).execute()
+        return result.data[0]["id"]
+
+    def insert_document(
+        self,
+        document: NormalizedDocument,
+        speaker_title: str | None = None,
+        speaker_institution: str | None = None,
+        is_fomc_member: bool = False,
+        source_document_id: int | None = None,
+    ) -> int:
+        existing = self._select_one("documents", document_key=document.document_id)
+        if existing:
+            return existing["id"]
+
+        speaker_id = None
+        if document.speaker_name:
+            speaker_id = self.get_or_create_speaker(
+                document.speaker_name,
+                title=speaker_title,
+                institution=speaker_institution,
+                is_fomc_member=is_fomc_member,
+            )
+
+        result = self.client.table("documents").insert(
+            {
+                "document_key": document.document_id,
+                "source_document_id": source_document_id,
+                "speaker_id": speaker_id,
+                "speaker_name": document.speaker_name,
+                "title": document.title,
+                "speech_date": document.speech_date.isoformat() if document.speech_date else None,
+                "document_type": document.document_type.value,
+                "source": document.source,
+                "content_type": document.content_type.value,
+                "normalized_text": document.normalized_text,
+                "source_hash": document.source_hash,
+                "source_metadata": document.source_metadata,
+                "word_count": len(document.normalized_text.split()),
+            }
+        ).execute()
+        document_id = result.data[0]["id"]
+
+        if document.segments:
+            rows = [
+                {
+                    "document_id": document_id,
+                    "segment_index": segment.segment_index,
+                    "speaker_name": segment.speaker_name,
+                    "segment_type": segment.segment_type.value,
+                    "text": segment.text,
+                }
+                for segment in document.segments
+            ]
+            self.client.table("document_segments").insert(rows).execute()
+
+        return document_id
+
+    def get_latest_document_for_speaker(
         self,
         speaker_name: str,
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        Get recent speeches by speaker.
-
-        Args:
-            speaker_name: Full speaker name
-            limit: Max number to return
-
-        Returns:
-            List of speech records
-        """
-        result = (
-            self.client.table("speeches")
+        exclude_document_key: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        query = (
+            self.client.table("documents")
             .select("*")
             .eq("speaker_name", speaker_name)
             .order("speech_date", desc=True)
-            .limit(limit)
+            .order("created_at", desc=True)
+        )
+        result = query.limit(25).execute()
+        for row in result.data:
+            if exclude_document_key and row.get("document_key") == exclude_document_key:
+                continue
+            return row
+        return None
+
+    def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
+        return self._select_one("documents", id=document_id)
+
+    def get_document_by_key(self, document_key: str) -> Optional[Dict[str, Any]]:
+        return self._select_one("documents", document_key=document_key)
+
+    def get_document_segments(self, document_id: int) -> List[Dict[str, Any]]:
+        result = (
+            self.client.table("document_segments")
+            .select("*")
+            .eq("document_id", document_id)
+            .order("segment_index")
             .execute()
         )
         return result.data
 
-    # =========================================================================
-    # FINGERPRINTS
-    # =========================================================================
+    def get_documents_for_speaker(
+        self,
+        speaker_name: str,
+        before_date: Optional[date] = None,
+        within_days: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self.client.table("documents")
+            .select("*")
+            .eq("speaker_name", speaker_name)
+            .order("speech_date", desc=True)
+            .order("created_at", desc=True)
+            .limit(limit)
+        )
+        result = query.execute()
+        rows = result.data
+        if before_date:
+            rows = [row for row in rows if row.get("speech_date") and row["speech_date"] < before_date.isoformat()]
+        if before_date and within_days:
+            floor = before_date - timedelta(days=within_days)
+            rows = [row for row in rows if row.get("speech_date") and row["speech_date"] >= floor.isoformat()]
+        return rows
+
+    def get_context_documents(
+        self,
+        speaker_name: str,
+        before_date: Optional[date] = None,
+        within_days: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        return self.get_documents_for_speaker(
+            speaker_name=speaker_name,
+            before_date=before_date,
+            within_days=within_days,
+            limit=limit,
+        )
+
+    # ---------------------------------------------------------------------
+    # Analysis artifacts
+    # ---------------------------------------------------------------------
+
+    def insert_analysis_run(self, run: AnalysisRun) -> int:
+        existing = self._select_one("analysis_runs", run_key=run.run_id)
+        if existing:
+            return existing["id"]
+
+        result = self.client.table("analysis_runs").insert(
+            {
+                "run_key": run.run_id,
+                "analysis_type": run.analysis_type,
+                "target_type": "document",
+                "target_id": run.target_id,
+                "prompt_version": run.prompt_version,
+                "model_version": run.model_version,
+                "input_hash": run.input_hash,
+                "raw_output": run.raw_output,
+                "parsed_output": run.parsed_output,
+            }
+        ).execute()
+        return result.data[0]["id"]
 
     def insert_fingerprint(
         self,
-        speech_id: int,
-        themes: Dict[str, Any],
-        policy_implications: Dict[str, Any],
-        overall_tone: str,
-        raw_llm_response: str = None,
-        model_version: str = "claude-sonnet-4-20250514",
-        prompt_version: str = "v1.0"
+        fingerprint: SemanticFingerprint,
+        document_id: int,
+        analysis_run_id: int | None = None,
     ) -> int:
-        """
-        Insert semantic fingerprint for a speech.
+        existing = (
+            self.client.table("fingerprints")
+            .select("id")
+            .eq("document_id", document_id)
+            .eq("prompt_version", fingerprint.prompt_version)
+            .eq("model_version", fingerprint.model_version)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return existing.data[0]["id"]
 
-        Args:
-            speech_id: ID of speech
-            themes: Theme dictionary (from extract.py)
-            policy_implications: Policy implications dict
-            overall_tone: Overall tone string
-            raw_llm_response: Raw LLM output for debugging
-            model_version: Model used for extraction
-            prompt_version: Prompt version used
+        result = self.client.table("fingerprints").insert(
+            {
+                "document_id": document_id,
+                "analysis_run_id": analysis_run_id,
+                "prompt_version": fingerprint.prompt_version,
+                "model_version": fingerprint.model_version,
+                "themes": {name: value.model_dump() for name, value in fingerprint.themes.items()},
+                "emergent_themes": fingerprint.emergent_themes,
+                "phrase_signals": [signal.model_dump() for signal in fingerprint.phrase_signals],
+                "overall_tone": fingerprint.overall_tone,
+                "uncertainty_notes": fingerprint.uncertainty_notes,
+                "raw_llm_response": fingerprint.raw_llm_response,
+            }
+        ).execute()
+        fingerprint_id = result.data[0]["id"]
 
-        Returns:
-            Fingerprint ID
-        """
-        result = self.client.table("fingerprints").insert({
-            "speech_id": speech_id,
-            "themes": themes,
-            "policy_implications": policy_implications,
-            "overall_tone": overall_tone,
-            "raw_llm_response": raw_llm_response,
-            "model_version": model_version,
-            "prompt_version": prompt_version
-        }).execute()
+        if fingerprint.phrase_signals:
+            speaker_id = None
+            if fingerprint.speaker_name:
+                speaker = self._select_one("speakers", speaker_key=self._speaker_key(fingerprint.speaker_name))
+                speaker_id = speaker["id"] if speaker else None
+            self.client.table("phrase_observations").insert(
+                [
+                    {
+                        "document_id": document_id,
+                        "speaker_id": speaker_id,
+                        "phrase_text": signal.phrase_text,
+                        "normalized_phrase": signal.normalized_phrase,
+                        "semantic_key": signal.semantic_key,
+                        "current_count": signal.current_count,
+                        "historical_count": signal.historical_count,
+                        "rarity_score": signal.rarity_score,
+                        "examples": signal.examples,
+                    }
+                    for signal in fingerprint.phrase_signals
+                ]
+            ).execute()
 
-        return result.data[0]["id"]
+        return fingerprint_id
 
-    def get_fingerprint(self, fingerprint_id: int) -> Optional[Dict[str, Any]]:
-        """Get fingerprint by ID."""
-        result = self.client.table("fingerprints").select("*").eq("id", fingerprint_id).execute()
-        return result.data[0] if result.data else None
-
-    def get_fingerprint_for_speech(self, speech_id: int) -> Optional[Dict[str, Any]]:
-        """Get most recent fingerprint for a speech."""
+    def get_latest_fingerprint_for_document(self, document_id: int) -> Optional[Dict[str, Any]]:
         result = (
             self.client.table("fingerprints")
             .select("*")
-            .eq("speech_id", speech_id)
-            .order("extraction_date", desc=True)
+            .eq("document_id", document_id)
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
         return result.data[0] if result.data else None
 
-    # =========================================================================
-    # DETECTED SHIFTS
-    # =========================================================================
-
-    def insert_detected_shifts(
+    def get_fingerprint_for_document(
         self,
-        speech_a_id: int,
-        speech_b_id: int,
-        fingerprint_a_id: int,
-        fingerprint_b_id: int,
-        shifts: List[Dict[str, Any]]
+        document_id: int,
+        prompt_version: str | None = None,
+        model_version: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        query = self.client.table("fingerprints").select("*").eq("document_id", document_id)
+        if prompt_version:
+            query = query.eq("prompt_version", prompt_version)
+        if model_version:
+            query = query.eq("model_version", model_version)
+        result = query.order("created_at", desc=True).limit(1).execute()
+        return result.data[0] if result.data else None
+
+    def insert_comparison_result(
+        self,
+        comparison: ComparisonResult,
+        target_document_id: int,
+        target_fingerprint_id: int,
+        base_document_id: int | None = None,
+        base_fingerprint_id: int | None = None,
     ) -> int:
-        """
-        Insert detected shifts between two speeches.
+        existing = self._select_one("comparison_results", comparison_key=comparison.comparison_id)
+        if existing:
+            return existing["id"]
 
-        Args:
-            speech_a_id: Earlier speech ID
-            speech_b_id: Later speech ID
-            fingerprint_a_id: Earlier fingerprint ID
-            fingerprint_b_id: Later fingerprint ID
-            shifts: List of shift objects (from compare.py)
+        speaker_id = None
+        if comparison.speaker_name:
+            speaker = self._select_one("speakers", speaker_key=self._speaker_key(comparison.speaker_name))
+            speaker_id = speaker["id"] if speaker else None
 
-        Returns:
-            Detected shifts ID
-        """
-        # Calculate summary stats
-        high_count = sum(1 for s in shifts if s.get("significance") == "HIGH")
-        medium_count = sum(1 for s in shifts if s.get("significance") == "MEDIUM")
-        low_count = sum(1 for s in shifts if s.get("significance") == "LOW")
-
-        result = self.client.table("detected_shifts").insert({
-            "speech_a_id": speech_a_id,
-            "speech_b_id": speech_b_id,
-            "fingerprint_a_id": fingerprint_a_id,
-            "fingerprint_b_id": fingerprint_b_id,
-            "shifts": shifts,
-            "total_shifts": len(shifts),
-            "high_significance_count": high_count,
-            "medium_significance_count": medium_count,
-            "low_significance_count": low_count
-        }).execute()
-
+        result = self.client.table("comparison_results").insert(
+            {
+                "comparison_key": comparison.comparison_id,
+                "speaker_id": speaker_id,
+                "speaker_name": comparison.speaker_name,
+                "base_document_id": base_document_id,
+                "target_document_id": target_document_id,
+                "base_fingerprint_id": base_fingerprint_id,
+                "target_fingerprint_id": target_fingerprint_id,
+                "comparison_type": comparison.comparison_type.value,
+                "window_days": comparison.window_days,
+                "theme_changes": [change.model_dump() for change in comparison.theme_changes],
+                "orphaned_concepts": comparison.orphaned_concepts,
+                "new_themes": comparison.new_themes,
+                "phrase_anomalies": [signal.model_dump() for signal in comparison.phrase_anomalies],
+                "summary": comparison.summary,
+                "uncertainty_notes": comparison.uncertainty_notes,
+            }
+        ).execute()
         return result.data[0]["id"]
 
-    def get_high_significance_shifts(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Get recent high-significance shifts."""
-        result = (
-            self.client.table("high_significance_shifts")
-            .select("*")
-            .limit(limit)
-            .execute()
-        )
+    # ---------------------------------------------------------------------
+    # Compatibility helpers for old naming
+    # ---------------------------------------------------------------------
+
+    def speech_exists(self, url: str) -> bool:
+        result = self.client.table("source_documents").select("id").eq("source_url", url).limit(1).execute()
+        return bool(result.data)
+
+    def source_document_exists(self, source_url: str) -> bool:
+        return self.speech_exists(source_url)
+
+    def get_recent_documents_with_fingerprints(self, limit: int = 10) -> List[Dict[str, Any]]:
+        result = self.client.table("recent_documents_with_fingerprints").select("*").limit(limit).execute()
         return result.data
 
-    # =========================================================================
-    # CONVENIENCE METHODS
-    # =========================================================================
+    def get_recent_comparisons(
+        self,
+        speaker_name: str | None = None,
+        comparison_type: str | None = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        query = self.client.table("comparison_results").select("*").order("created_at", desc=True).limit(limit)
+        if speaker_name:
+            query = query.eq("speaker_name", speaker_name)
+        if comparison_type:
+            query = query.eq("comparison_type", comparison_type)
+        return query.execute().data
 
-    def get_recent_speeches_with_fingerprints(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent speeches with their fingerprints."""
-        result = (
-            self.client.table("recent_speeches_with_fingerprints")
-            .select("*")
-            .limit(limit)
-            .execute()
-        )
-        return result.data
-
-    def get_speaker_timeline(
+    def get_phrase_observations(
         self,
         speaker_name: str,
-        theme: str = None
+        limit: int = 25,
+        min_rarity: float | None = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Get timeline of speeches for a speaker, optionally filtered by theme.
-
-        Args:
-            speaker_name: Full speaker name
-            theme: Optional theme to filter by (e.g., "INFLATION")
-
-        Returns:
-            List of speeches with fingerprints, ordered by date
-        """
         query = (
-            self.client.table("recent_speeches_with_fingerprints")
-            .select("*")
-            .eq("speaker_name", speaker_name)
+            self.client.table("phrase_observations")
+            .select("*, documents!inner(speaker_name, speech_date, title)")
+            .eq("documents.speaker_name", speaker_name)
+            .order("rarity_score", desc=True)
+            .limit(limit)
         )
+        rows = query.execute().data
+        if min_rarity is not None:
+            rows = [row for row in rows if (row.get("rarity_score") or 0) >= min_rarity]
+        return rows
 
-        result = query.execute()
-
-        speeches = result.data
-
-        # Filter by theme if specified
-        if theme:
-            speeches = [
-                s for s in speeches
-                if s.get("themes") and theme in s["themes"]
-            ]
-
-        return sorted(speeches, key=lambda x: x["speech_date"])
+    def get_recent_document_for_speaker(self, speaker_name: str) -> Optional[Dict[str, Any]]:
+        rows = self.get_documents_for_speaker(speaker_name=speaker_name, limit=1)
+        return rows[0] if rows else None
 
 
 if __name__ == "__main__":
-    # Test connection
     db = Database()
-    print("✅ Database connection successful!")
-
-    # Test queries
-    speakers = db.client.table("speakers").select("*").execute()
-    print(f"\n📊 Found {len(speakers.data)} speakers in database")
-
-    recent = db.get_recent_speeches_with_fingerprints(limit=5)
-    print(f"📄 Found {len(recent)} recent speeches")
+    print("Database connection successful")
+    recent = db.get_recent_documents_with_fingerprints(limit=5)
+    print(f"Found {len(recent)} recent documents")

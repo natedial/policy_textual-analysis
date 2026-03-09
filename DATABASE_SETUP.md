@@ -1,143 +1,77 @@
 # Database Setup Guide
 
-## Setting Up Supabase
+## Overview
 
-### 1. Create Supabase Project
+The schema now targets an agent-first analysis workflow with replayable artifacts.
+
+Core tables:
+- `speakers`
+- `source_documents`
+- `documents`
+- `document_segments`
+- `analysis_runs`
+- `fingerprints`
+- `phrase_observations`
+- `comparison_results`
+
+## Supabase Setup
+
+### 1. Create a project
 
 1. Go to https://supabase.com
-2. Sign up / Log in
-3. Click "New Project"
-4. Choose a name (e.g., "fed-tracker")
-5. Set a strong database password (save this!)
-6. Choose a region (closest to you)
-7. Click "Create new project"
+2. Create a new project
+3. Save the project URL and API key
 
-Wait ~2 minutes for provisioning.
+### 2. Apply the schema
 
-### 2. Run Schema Migration
+1. Open the SQL editor in Supabase
+2. Paste the contents of `schema.sql`
+3. Run the script
 
-1. In your Supabase dashboard, go to **SQL Editor** (left sidebar)
-2. Click **"New query"**
-3. Copy the entire contents of `schema.sql`
-4. Paste into the SQL editor
-5. Click **"Run"** (or press Cmd/Ctrl + Enter)
-
-You should see: "Success. No rows returned"
-
-### 3. Verify Tables Created
-
-Go to **Table Editor** in the sidebar. You should see:
-- `speakers` (with 7 seed speakers)
-- `speeches`
-- `fingerprints`
-- `detected_shifts`
-
-### 4. Get Database Credentials
-
-Go to **Project Settings** → **Database**
-
-You'll need:
-- **Connection String** (URI format)
-- Or individual values:
-  - Host
-  - Database name
-  - Port
-  - User
-  - Password
-
-### 5. Configure Application
-
-Add to your `.env` file:
+### 3. Configure `.env`
 
 ```bash
 SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_KEY=your-anon-key-here
+SUPABASE_KEY=your-anon-key
 DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.your-project-ref.supabase.co:5432/postgres
 ```
 
-**Finding your keys:**
-- `SUPABASE_URL` and `SUPABASE_KEY`: **Project Settings** → **API**
-- `DATABASE_URL`: **Project Settings** → **Database** → Connection string (URI mode)
-
-### 6. Install Python Dependencies
+### 4. Verify access
 
 ```bash
-source venv/bin/activate
-pip install supabase psycopg2-binary
+./venv/bin/python -c "from db import Database; db = Database(); print(len(db.get_recent_documents_with_fingerprints(limit=5)))"
 ```
 
-### 7. Test Connection
+## Schema Notes
 
-```bash
-python -c "from supabase import create_client, Client; import os; supabase = create_client(os.getenv('SUPABASE_URL'), os.getenv('SUPABASE_KEY')); print(supabase.table('speakers').select('*').execute())"
-```
+### `source_documents`
+Stores the fetched or scraped source payload before normalization.
 
-You should see the 7 seed speakers.
+### `documents`
+Stores the normalized canonical document used for analysis.
 
-## Schema Overview
+### `document_segments`
+Stores optional paragraph or speaker-turn segmentation for transcript-like content.
 
-### Core Tables
+### `analysis_runs`
+Stores replay metadata for extraction and comparison steps.
 
-**speakers**: Fed officials
-- Stores name, title, institution
-- Seeded with current Board members
+### `fingerprints`
+Stores structured semantic fingerprints for a normalized document.
 
-**speeches**: Raw content
-- URL, speaker, date, type
-- Full text from HTML/PDF
-- Deduplication via unique URL constraint
+### `phrase_observations`
+Stores exact, normalized, and hashed phrase-level anomaly records.
 
-**fingerprints**: Semantic analysis
-- Linked to speech
-- JSON themes (stance, trajectory, emphasis, etc.)
-- Tracks model version and prompt version for reproducibility
+### `comparison_results`
+Stores structured comparison artifacts across `t-1` and context windows.
 
-**detected_shifts**: Comparison results
-- Links two speeches via their fingerprints
-- Stores all detected shifts as JSON
-- Summary counts for quick filtering
+## Next Build Targets
 
-### Useful Queries
+The pipeline can now persist via `fed_tracker.pipeline.AnalysisPipeline` and the `ingest.py` entrypoint.
 
-**Get all Powell speeches:**
-```sql
-SELECT * FROM speeches
-WHERE speaker_name = 'Jerome H. Powell'
-ORDER BY speech_date DESC;
-```
+## Next Build Targets
 
-**Find speeches with fingerprints:**
-```sql
-SELECT * FROM recent_speeches_with_fingerprints
-WHERE speaker_name = 'Jerome H. Powell';
-```
-
-**Get high-significance shifts only:**
-```sql
-SELECT * FROM high_significance_shifts
-WHERE speaker_name = 'Jerome H. Powell';
-```
-
-**Track inflation stance over time:**
-```sql
-SELECT
-  s.speech_date,
-  s.title,
-  f.themes->'INFLATION'->>'stance' as stance,
-  (f.themes->'INFLATION'->>'emphasis_score')::int as emphasis
-FROM fingerprints f
-JOIN speeches s ON f.speech_id = s.id
-WHERE s.speaker_name = 'Jerome H. Powell'
-  AND f.themes ? 'INFLATION'
-ORDER BY s.speech_date;
-```
-
-## Next Steps
-
-After setting up the database:
-1. Run the ingestion script to add your first speech
-2. Verify fingerprint extraction works
-3. Test shift detection with two speeches
-4. Build out the Streamlit UI
-
-See `README.md` for application usage instructions.
+1. Add richer ingestion for pre-scraped markdown and site-specific scrapers
+2. Add speaker-specific historical retrieval jobs for 75d/24m windows
+3. Add agent-facing query tools over stored artifacts
+4. Add stronger boilerplate suppression and phrase clustering

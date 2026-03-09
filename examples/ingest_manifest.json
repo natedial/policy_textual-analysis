@@ -1,0 +1,18 @@
+{
+  "skip_existing": true,
+  "urls": [
+    "https://www.federalreserve.gov/newsevents/speech/jefferson20251107a.htm",
+    "https://www.federalreserve.gov/newsevents/speech/jefferson20251117a.htm"
+  ],
+  "markdown_files": [
+    {
+      "path": "examples/sample_speech.md",
+      "metadata": {
+        "speaker_name": "Jerome H. Powell",
+        "speech_date": "2026-03-08",
+        "document_type": "speech",
+        "source": "Board of Governors"
+      }
+    }
+  ]
+}
