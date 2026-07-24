@@ -239,10 +239,35 @@ Scores are independent model estimates for research only. Not affiliated with De
 ### Score curated docs and export CSV/JSON
 
 ```bash
-python score_hawk_dove.py --heuristic \
+python score_hawk_dove.py --method heuristic \
   --markdown-file examples/hawk_dove/hawkish_speech.md \
   --metadata-json '{"speaker_name":"Christopher J. Waller","speech_date":"2025-06-15","document_type":"speech"}' \
   --output-dir /tmp/hawk_dove_out
+```
+
+Compare methodologies (A/B):
+
+```bash
+python score_hawk_dove.py --compare-methods heuristic,roberta \
+  --markdown-file examples/hawk_dove/hawkish_speech.md \
+  --metadata-json '{"speaker_name":"Christopher J. Waller","speech_date":"2025-06-15","document_type":"speech"}' \
+  --output-dir /tmp/hawk_dove_compare
+```
+
+RoBERTa optional deps:
+
+```bash
+pip install -r requirements-roberta.txt
+```
+
+Persist observations and materialize official/committee snapshots:
+
+```bash
+python score_hawk_dove.py --method heuristic --persist \
+  --markdown-file examples/hawk_dove/neutral_speech.md \
+  --metadata-json '{"speaker_name":"Jerome H. Powell","speech_date":"2025-06-18","document_type":"speech"}'
+
+python score_hawk_dove.py --materialize-from-db --method heuristic --as-of 2025-06-18
 ```
 
 Validation set (batch via URLs file pattern — score each curated markdown through the CLI or dashboard):

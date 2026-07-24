@@ -115,6 +115,9 @@ class OfficialAggregate(BaseModel):
     score_keys: List[str] = Field(default_factory=list)
     was_voter: Optional[bool] = None
     was_fomc_participant: Optional[bool] = None
+    prompt_version: Optional[str] = None
+    model_version: Optional[str] = None
+    calibration_version: str = "none"
 
 
 class CommitteeAggregate(BaseModel):
@@ -128,6 +131,9 @@ class CommitteeAggregate(BaseModel):
     communication_count: int = 0
     coverage_notes: Dict[str, Any] = Field(default_factory=dict)
     official_scores: List[OfficialAggregate] = Field(default_factory=list)
+    prompt_version: Optional[str] = None
+    model_version: Optional[str] = None
+    calibration_version: str = "none"
 
 
 class MembershipRecord(BaseModel):

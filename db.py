@@ -624,6 +624,9 @@ class Database:
         speaker_name: str | None = None,
         limit: int = 100,
         include_insufficient: bool = False,
+        model_version: str | None = None,
+        prompt_version: str | None = None,
+        calibration_version: str | None = None,
     ) -> List[Dict[str, Any]]:
         query = (
             self.client.table("hawk_dove_scores")
@@ -634,6 +637,12 @@ class Database:
         )
         if speaker_name:
             query = query.eq("speaker_name", speaker_name)
+        if model_version:
+            query = query.eq("model_version", model_version)
+        if prompt_version:
+            query = query.eq("prompt_version", prompt_version)
+        if calibration_version:
+            query = query.eq("calibration_version", calibration_version)
         if not include_insufficient:
             query = query.eq("insufficient_policy_content", False)
         return query.execute().data
@@ -641,7 +650,9 @@ class Database:
     def insert_official_score_snapshot(self, aggregate: "OfficialAggregate", snapshot_key: str | None = None) -> int:
         if OfficialAggregate is None:
             raise RuntimeError("hawk_dove.models is not available")
-        key = snapshot_key or f"official_{aggregate.speaker_name}_{aggregate.as_of_date.isoformat()}_{aggregate.method}"
+        from hawk_dove.snapshots import official_snapshot_key
+
+        key = snapshot_key or official_snapshot_key(aggregate)
         existing = self._select_one("official_score_snapshots", snapshot_key=key)
         if existing:
             return existing["id"]
@@ -665,6 +676,9 @@ class Database:
                 "communication_count": aggregate.communication_count,
                 "coverage_notes": aggregate.coverage_notes,
                 "score_keys": aggregate.score_keys,
+                "prompt_version": aggregate.prompt_version,
+                "model_version": aggregate.model_version,
+                "calibration_version": aggregate.calibration_version or "none",
             }
         ).execute()
         return result.data[0]["id"]
@@ -672,7 +686,9 @@ class Database:
     def insert_committee_score_snapshot(self, aggregate: "CommitteeAggregate", snapshot_key: str | None = None) -> int:
         if CommitteeAggregate is None:
             raise RuntimeError("hawk_dove.models is not available")
-        key = snapshot_key or f"committee_{aggregate.cohort}_{aggregate.as_of_date.isoformat()}_{aggregate.method}"
+        from hawk_dove.snapshots import committee_snapshot_key
+
+        key = snapshot_key or committee_snapshot_key(aggregate)
         existing = self._select_one("committee_score_snapshots", snapshot_key=key)
         if existing:
             return existing["id"]
@@ -689,9 +705,54 @@ class Database:
                 "communication_count": aggregate.communication_count,
                 "coverage_notes": aggregate.coverage_notes,
                 "official_scores": [row.model_dump(mode="json") for row in aggregate.official_scores],
+                "prompt_version": aggregate.prompt_version,
+                "model_version": aggregate.model_version,
+                "calibration_version": aggregate.calibration_version or "none",
             }
         ).execute()
         return result.data[0]["id"]
+
+    def get_official_score_snapshots(
+        self,
+        speaker_name: str | None = None,
+        model_version: str | None = None,
+        method: str | None = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self.client.table("official_score_snapshots")
+            .select("*")
+            .order("as_of_date", desc=True)
+            .limit(limit)
+        )
+        if speaker_name:
+            query = query.eq("speaker_name", speaker_name)
+        if model_version:
+            query = query.eq("model_version", model_version)
+        if method:
+            query = query.eq("method", method)
+        return query.execute().data
+
+    def get_committee_score_snapshots(
+        self,
+        cohort: str | None = None,
+        model_version: str | None = None,
+        method: str | None = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self.client.table("committee_score_snapshots")
+            .select("*")
+            .order("as_of_date", desc=True)
+            .limit(limit)
+        )
+        if cohort:
+            query = query.eq("cohort", cohort)
+        if model_version:
+            query = query.eq("model_version", model_version)
+        if method:
+            query = query.eq("method", method)
+        return query.execute().data
 
 
 if __name__ == "__main__":

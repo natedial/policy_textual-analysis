@@ -132,8 +132,14 @@ class HawkDovePipeline:
         return score_id, analysis_run_id
 
 
-def build_pipeline(persist: bool = False) -> HawkDovePipeline:
+def build_pipeline(persist: bool = False, method: str | None = None) -> HawkDovePipeline:
     database = None
     if persist and Database is not None and os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"):
         database = Database()
-    return HawkDovePipeline(database=database)
+    if method:
+        from hawk_dove.registry import get_scorer
+
+        scorer = get_scorer(method)
+    else:
+        scorer = default_scorer()
+    return HawkDovePipeline(scorer=scorer, database=database)

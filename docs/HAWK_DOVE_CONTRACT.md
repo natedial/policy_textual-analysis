@@ -66,6 +66,30 @@ Rescoring never updates an existing row; it inserts a new version.
 - Require ≥1 qualifying communication in the window
 - Always report coverage counts alongside aggregates
 
+## Observation → time-series contract
+
+System of record is Supabase/Postgres (not CSV exports).
+
+1. **Observations** (`hawk_dove_scores`): append-only per communication; never overwrite on rescore. Branch series by `prompt_version` / `model_version` / `calibration_version`.
+2. **Official snapshots** (`official_score_snapshots`): materialized EWMA (default) points for each official as-of a calendar date, keyed by method + model versions so A/B series do not collide.
+3. **Committee snapshots** (`committee_score_snapshots`): equal-weight rollups for `all_participants` and `voters` cohorts.
+4. **Views**: `official_hawk_dove_timeseries`, `committee_hawk_dove_timeseries` for trend queries.
+5. Materialize after `--persist` scoring or via `score_hawk_dove.py --materialize-from-db`.
+
+CSV/JSON under `--output-dir` is export-only.
+
+## Methodologies
+
+Swappable via `hawk_dove.registry.get_scorer` / CLI `--method`:
+
+| Method | `model_version` | Notes |
+|--------|-----------------|-------|
+| `heuristic` | `heuristic-hawkdove-v1` | Lexicon baseline |
+| `anthropic` | Claude model id | Rubric LLM scorer |
+| `roberta` | `gtfintechlab/fomc-hawkish-dovish` | Sentence classifier baseline; component scores are keyword-routed, not native heads |
+
+Use `--compare-methods heuristic,roberta` for side-by-side export.
+
 ## Editorial labels
 
 All user-facing surfaces must disclose that scores are independent model estimates for research, not investment advice, and are unaffiliated with Deutsche Bank or the Federal Reserve.

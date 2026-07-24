@@ -361,6 +361,47 @@ LEFT JOIN documents d ON s.document_id = d.id
 WHERE s.insufficient_policy_content = false
 ORDER BY s.speech_date DESC NULLS LAST, s.scored_at DESC;
 
+CREATE OR REPLACE VIEW official_hawk_dove_timeseries AS
+SELECT
+    speaker_name,
+    as_of_date,
+    overall_score,
+    inflation_score,
+    labor_score,
+    growth_score,
+    policy_action_score,
+    communication_count,
+    method,
+    window_days,
+    half_life_days,
+    prompt_version,
+    model_version,
+    calibration_version,
+    coverage_notes,
+    snapshot_key,
+    created_at
+FROM official_score_snapshots
+ORDER BY speaker_name, as_of_date, model_version;
+
+CREATE OR REPLACE VIEW committee_hawk_dove_timeseries AS
+SELECT
+    cohort,
+    as_of_date,
+    overall_score,
+    official_count,
+    communication_count,
+    method,
+    window_days,
+    half_life_days,
+    prompt_version,
+    model_version,
+    calibration_version,
+    coverage_notes,
+    snapshot_key,
+    created_at
+FROM committee_score_snapshots
+ORDER BY cohort, as_of_date, model_version;
+
 -- =============================================================================
 -- COMMENTS
 -- =============================================================================
