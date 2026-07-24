@@ -20,7 +20,14 @@ from hawk_dove.discovery import discover_new_urls
 from hawk_dove.officials import OfficialsDirectory
 from hawk_dove.pipeline import HawkDovePipeline
 from hawk_dove.query import HawkDoveQueryService
-from hawk_dove.registry import get_scorer
+from hawk_dove.scoring import HeuristicHawkDoveScorer
+
+# Model version tags used for stored-series lookups without importing transformers.
+METHOD_MODEL_VERSIONS = {
+    "heuristic": "heuristic-hawkdove-v1",
+    "roberta": "gtfintechlab/fomc-hawkish-dovish",
+    "anthropic": "claude-sonnet-4-5-20250929",
+}
 
 st.set_page_config(layout="wide", page_title="Fed Hawk–Dove Tracker")
 
@@ -33,6 +40,31 @@ st.caption(
 officials = OfficialsDirectory()
 db_configured = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"))
 
+
+def build_ui_scorer(method: str, use_hf_roberta: bool):
+    """Build a scorer without importing transformers unless explicitly requested."""
+    if method == "heuristic":
+        return HeuristicHawkDoveScorer()
+    if method == "anthropic":
+        from hawk_dove.registry import get_scorer
+
+        return get_scorer("anthropic")
+    # roberta — default to stub so Streamlit does not import transformers on every rerun
+    from hawk_dove.roberta import RobertaHawkDoveScorer, StubSentenceClassifier
+
+    if not use_hf_roberta:
+        return RobertaHawkDoveScorer(classifier=StubSentenceClassifier(), use_transformers=False)
+    try:
+        return RobertaHawkDoveScorer(use_transformers=True)
+    except Exception as exc:
+        st.warning(
+            f"HuggingFace RoBERTa unavailable ({exc}). "
+            "Falling back to stub classifier. Optional fix: "
+            "`pip install -r requirements-roberta.txt`"
+        )
+        return RobertaHawkDoveScorer(classifier=StubSentenceClassifier(), use_transformers=False)
+
+
 with st.sidebar:
     st.header("Score inputs")
     mode = st.radio(
@@ -40,23 +72,23 @@ with st.sidebar:
         ["Curated validation set", "Markdown paste", "Discover URLs", "Stored time series"],
     )
     method = st.selectbox("Method", ["heuristic", "roberta", "anthropic"], index=0)
+    use_hf_roberta = False
+    if method == "roberta":
+        use_hf_roberta = st.checkbox(
+            "Load HuggingFace RoBERTa weights",
+            value=False,
+            help=(
+                "Off by default to avoid Streamlit/transformers watcher noise. "
+                "Requires: pip install -r requirements-roberta.txt"
+            ),
+        )
     as_of = st.date_input("As-of date", value=date.today())
     window_days = st.slider("Window (days)", min_value=30, max_value=180, value=DEFAULT_WINDOW_DAYS)
     half_life = st.slider("EWMA half-life (days)", min_value=7, max_value=60, value=int(DEFAULT_HALF_LIFE_DAYS))
     run = st.button("Run")
 
-scorer = get_scorer(method)
-# Prefer stub RoBERTa in UI unless transformers is installed and user chose roberta with network.
-if method == "roberta":
-    from hawk_dove.roberta import RobertaHawkDoveScorer, StubSentenceClassifier
-
-    try:
-        scorer = RobertaHawkDoveScorer(use_transformers=True)
-    except Exception:
-        scorer = RobertaHawkDoveScorer(classifier=StubSentenceClassifier(), use_transformers=False)
-
-pipeline = HawkDovePipeline(scorer=scorer, officials=officials)
 observations = []
+model_version = METHOD_MODEL_VERSIONS.get(method, METHOD_MODEL_VERSIONS["heuristic"])
 
 if mode == "Stored time series":
     if not db_configured:
@@ -65,7 +97,6 @@ if mode == "Stored time series":
         from db import Database
 
         query = HawkDoveQueryService(Database())
-        model_version = scorer.model_version
         committee_series = query.committee_history(cohort="voters", model_version=model_version, limit=60)
         delta = query.change_since_prior_snapshot(cohort="voters", model_version=model_version)
         latest = committee_series[-1] if committee_series else None
@@ -93,6 +124,10 @@ if mode == "Stored time series":
                 st.info("No stored official snapshots for this speaker/model_version yet.")
 
 elif run:
+    scorer = build_ui_scorer(method, use_hf_roberta=use_hf_roberta)
+    pipeline = HawkDovePipeline(scorer=scorer, officials=officials)
+    model_version = scorer.model_version
+
     if mode == "Curated validation set":
         manifest = json.loads(Path("examples/hawk_dove/validation_set.json").read_text())
         for item in manifest["items"]:

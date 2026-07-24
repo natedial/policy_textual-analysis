@@ -254,11 +254,13 @@ python score_hawk_dove.py --compare-methods heuristic,roberta \
   --output-dir /tmp/hawk_dove_compare
 ```
 
-RoBERTa optional deps:
+RoBERTa optional deps (includes `torchvision`, needed to quiet Streamlit/transformers watcher noise):
 
 ```bash
 pip install -r requirements-roberta.txt
 ```
+
+In the Streamlit dashboard, RoBERTa defaults to a local stub classifier. Enable **Load HuggingFace RoBERTa weights** only when you want the real model.
 
 Persist observations and materialize official/committee snapshots:
 

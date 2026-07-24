@@ -83,7 +83,7 @@ class TransformersSentenceClassifier:
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "transformers is required for RobertaHawkDoveScorer. "
-                "Install optional deps: pip install transformers torch"
+                "Install optional deps: pip install -r requirements-roberta.txt"
             ) from exc
 
         kwargs = {"model": model_id, "tokenizer": model_id, "top_k": None}
