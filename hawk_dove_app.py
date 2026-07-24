@@ -20,7 +20,7 @@ from hawk_dove.discovery import discover_new_urls
 from hawk_dove.officials import OfficialsDirectory
 from hawk_dove.pipeline import HawkDovePipeline
 from hawk_dove.query import HawkDoveQueryService
-from hawk_dove.registry import KNOWN_METHODS, get_scorer
+from hawk_dove.registry import get_scorer
 
 st.set_page_config(layout="wide", page_title="Fed Hawk–Dove Tracker")
 
