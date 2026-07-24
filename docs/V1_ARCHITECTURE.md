@@ -198,3 +198,7 @@ V1 storage should additionally support:
 4. Expand `schema.sql` to support auditability and phrase tracking
 5. Convert `app.py` into a thin debugging client over the new pipeline
 6. Keep `/poc` as legacy reference code until the new pipeline fully supersedes it
+
+## Parallel hawk–dove layer
+
+Hawk–dove continuous scoring is implemented as a sibling product package (`hawk_dove/`), not as a replacement for fingerprints/comparisons. See [ADR_HAWK_DOVE_LAYER.md](ADR_HAWK_DOVE_LAYER.md) and [HAWK_DOVE_CONTRACT.md](HAWK_DOVE_CONTRACT.md).

@@ -1,0 +1,57 @@
+{
+  "version": "validation_v1",
+  "disclaimer": "Human labels are research targets for model evaluation, not ground truth facts.",
+  "items": [
+    {
+      "id": "hawkish_1",
+      "path": "examples/hawk_dove/hawkish_speech.md",
+      "expected_bucket": "hawkish",
+      "human_overall_min": 7.0,
+      "human_overall_max": 9.0,
+      "metadata": {
+        "speaker_name": "Christopher J. Waller",
+        "speech_date": "2025-06-15",
+        "document_type": "speech",
+        "source": "Board of Governors"
+      }
+    },
+    {
+      "id": "dovish_1",
+      "path": "examples/hawk_dove/dovish_speech.md",
+      "expected_bucket": "dovish",
+      "human_overall_min": 1.5,
+      "human_overall_max": 3.5,
+      "metadata": {
+        "speaker_name": "Austan D. Goolsbee",
+        "speech_date": "2025-06-20",
+        "document_type": "speech",
+        "source": "Chicago Fed"
+      }
+    },
+    {
+      "id": "neutral_1",
+      "path": "examples/hawk_dove/neutral_speech.md",
+      "expected_bucket": "neutral",
+      "human_overall_min": 4.0,
+      "human_overall_max": 6.0,
+      "metadata": {
+        "speaker_name": "Jerome H. Powell",
+        "speech_date": "2025-06-18",
+        "document_type": "speech",
+        "source": "Board of Governors"
+      }
+    },
+    {
+      "id": "insufficient_1",
+      "path": "examples/hawk_dove/insufficient_policy.md",
+      "expected_bucket": "insufficient",
+      "expect_insufficient_policy_content": true,
+      "metadata": {
+        "speaker_name": "Raphael W. Bostic",
+        "speech_date": "2025-05-01",
+        "document_type": "speech",
+        "source": "Atlanta Fed"
+      }
+    }
+  ]
+}

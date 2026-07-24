@@ -12,6 +12,16 @@ from supabase import Client, create_client
 
 from fed_tracker.models import AnalysisRun, ComparisonResult, NormalizedDocument, SemanticFingerprint
 
+try:
+    from hawk_dove.models import CommitteeAggregate, HawkDoveObservation, OfficialAggregate
+    from hawk_dove.officials import OfficialsDirectory, build_seed_memberships
+except ImportError:  # pragma: no cover - optional during partial installs
+    CommitteeAggregate = None  # type: ignore[assignment]
+    HawkDoveObservation = None  # type: ignore[assignment]
+    OfficialAggregate = None  # type: ignore[assignment]
+    OfficialsDirectory = None  # type: ignore[assignment]
+    build_seed_memberships = None  # type: ignore[assignment]
+
 load_dotenv()
 
 
@@ -48,11 +58,32 @@ class Database:
         title: str | None = None,
         institution: str | None = None,
         is_fomc_member: bool = False,
+        is_voting_member: bool = False,
+        term_start: date | None = None,
+        term_end: date | None = None,
+        name_variants: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
         speaker_key = self._speaker_key(name)
         existing = self._select_one("speakers", speaker_key=speaker_key)
         if existing:
+            updates: Dict[str, Any] = {}
+            if title and not existing.get("title"):
+                updates["title"] = title
+            if institution and not existing.get("institution"):
+                updates["institution"] = institution
+            if is_fomc_member and not existing.get("is_fomc_member"):
+                updates["is_fomc_member"] = True
+            if is_voting_member and not existing.get("is_voting_member"):
+                updates["is_voting_member"] = True
+            if term_start and not existing.get("term_start"):
+                updates["term_start"] = term_start.isoformat()
+            if term_end and not existing.get("term_end"):
+                updates["term_end"] = term_end.isoformat()
+            if name_variants:
+                updates["name_variants"] = name_variants
+            if updates:
+                self.client.table("speakers").update(updates).eq("id", existing["id"]).execute()
             return existing["id"]
 
         result = self.client.table("speakers").insert(
@@ -62,10 +93,113 @@ class Database:
                 "title": title,
                 "institution": institution,
                 "is_fomc_member": is_fomc_member,
+                "is_voting_member": is_voting_member,
+                "term_start": term_start.isoformat() if term_start else None,
+                "term_end": term_end.isoformat() if term_end else None,
+                "name_variants": name_variants or [],
                 "metadata": metadata or {},
             }
         ).execute()
         return result.data[0]["id"]
+
+    def upsert_speaker_membership(
+        self,
+        speaker_id: int,
+        calendar_year: int,
+        role: str,
+        institution: str,
+        is_fomc_participant: bool = True,
+        is_voting_member: bool = False,
+        effective_start: date | None = None,
+        effective_end: date | None = None,
+        notes: str | None = None,
+    ) -> int:
+        existing = (
+            self.client.table("speaker_memberships")
+            .select("*")
+            .eq("speaker_id", speaker_id)
+            .eq("calendar_year", calendar_year)
+            .eq("role", role)
+            .limit(1)
+            .execute()
+        )
+        payload = {
+            "speaker_id": speaker_id,
+            "calendar_year": calendar_year,
+            "role": role,
+            "institution": institution,
+            "is_fomc_participant": is_fomc_participant,
+            "is_voting_member": is_voting_member,
+            "effective_start": effective_start.isoformat() if effective_start else None,
+            "effective_end": effective_end.isoformat() if effective_end else None,
+            "notes": notes,
+        }
+        if existing.data:
+            result = (
+                self.client.table("speaker_memberships")
+                .update(payload)
+                .eq("id", existing.data[0]["id"])
+                .execute()
+            )
+            return result.data[0]["id"]
+        result = self.client.table("speaker_memberships").insert(payload).execute()
+        return result.data[0]["id"]
+
+    def seed_officials_directory(self) -> int:
+        if build_seed_memberships is None:
+            raise RuntimeError("hawk_dove.officials is not available")
+        count = 0
+        for record in build_seed_memberships():
+            speaker_id = self.get_or_create_speaker(
+                name=record.name,
+                title=record.role,
+                institution=record.institution,
+                is_fomc_member=record.is_fomc_participant,
+                is_voting_member=record.is_voting_member,
+                term_start=record.term_start,
+                term_end=record.term_end,
+                name_variants=record.name_variants,
+            )
+            self.upsert_speaker_membership(
+                speaker_id=speaker_id,
+                calendar_year=record.calendar_year,
+                role=record.role,
+                institution=record.institution,
+                is_fomc_participant=record.is_fomc_participant,
+                is_voting_member=record.is_voting_member,
+                effective_start=record.effective_start,
+                effective_end=record.effective_end,
+            )
+            count += 1
+        return count
+
+    def get_membership_for_speaker(
+        self,
+        speaker_name: str,
+        as_of: date,
+    ) -> Optional[Dict[str, Any]]:
+        speaker = self._select_one("speakers", speaker_key=self._speaker_key(speaker_name))
+        if not speaker:
+            # Fall back to name match.
+            result = self.client.table("speakers").select("*").ilike("name", f"%{speaker_name}%").limit(1).execute()
+            speaker = result.data[0] if result.data else None
+        if not speaker:
+            return None
+        rows = (
+            self.client.table("speaker_memberships")
+            .select("*")
+            .eq("speaker_id", speaker["id"])
+            .eq("calendar_year", as_of.year)
+            .execute()
+        )
+        for row in rows.data:
+            start = date.fromisoformat(row["effective_start"]) if row.get("effective_start") else date(as_of.year, 1, 1)
+            end = date.fromisoformat(row["effective_end"]) if row.get("effective_end") else date(as_of.year, 12, 31)
+            if start <= as_of <= end:
+                return {**row, "speaker": speaker}
+        if rows.data:
+            return {**rows.data[0], "speaker": speaker}
+        return None
 
     # ---------------------------------------------------------------------
     # Documents
@@ -420,6 +554,144 @@ class Database:
     def get_recent_document_for_speaker(self, speaker_name: str) -> Optional[Dict[str, Any]]:
         rows = self.get_documents_for_speaker(speaker_name=speaker_name, limit=1)
         return rows[0] if rows else None
+
+    # ---------------------------------------------------------------------
+    # Hawk–dove scores (append-only)
+    # ---------------------------------------------------------------------
+
+    def insert_hawk_dove_score(
+        self,
+        observation: "HawkDoveObservation",
+        document_id: int,
+        analysis_run_id: int | None = None,
+    ) -> int:
+        if HawkDoveObservation is None:
+            raise RuntimeError("hawk_dove.models is not available")
+
+        # Never overwrite: identical score_key returns existing; otherwise always insert new version.
+        existing = self._select_one("hawk_dove_scores", score_key=observation.score_key)
+        if existing:
+            return existing["id"]
+
+        speaker_id = None
+        if observation.speaker_name:
+            speaker_id = self.get_or_create_speaker(
+                observation.speaker_name,
+                title=observation.role,
+                institution=observation.institution,
+                is_fomc_member=bool(observation.was_fomc_participant_as_of_date),
+                is_voting_member=bool(observation.was_voter_as_of_date),
+            )
+
+        score = observation.score
+        result = self.client.table("hawk_dove_scores").insert(
+            {
+                "score_key": observation.score_key,
+                "document_id": document_id,
+                "speaker_id": speaker_id,
+                "speaker_name": observation.speaker_name,
+                "speech_date": observation.speech_date.isoformat() if observation.speech_date else None,
+                "document_type": observation.document_type,
+                "source_url": observation.source_url,
+                "source_hash": observation.source_hash,
+                "overall_score": None if score.insufficient_policy_content else score.overall_score,
+                "inflation_score": None if score.insufficient_policy_content else score.inflation_score,
+                "labor_score": None if score.insufficient_policy_content else score.labor_score,
+                "growth_score": None if score.insufficient_policy_content else score.growth_score,
+                "policy_action_score": None if score.insufficient_policy_content else score.policy_action_score,
+                "confidence": score.confidence,
+                "rationale": score.rationale,
+                "evidence": [item.model_dump() for item in score.evidence],
+                "section_scores": [item.model_dump() for item in score.section_scores],
+                "insufficient_policy_content": score.insufficient_policy_content,
+                "was_voter_as_of_date": observation.was_voter_as_of_date,
+                "was_fomc_participant_as_of_date": observation.was_fomc_participant_as_of_date,
+                "prompt_version": observation.prompt_version,
+                "model_version": observation.model_version,
+                "model_parameters": observation.model_parameters,
+                "extraction_version": observation.extraction_version,
+                "calibration_version": observation.calibration_version,
+                "analysis_run_id": analysis_run_id,
+                "manual_override": observation.manual_override,
+                "override_notes": observation.override_notes,
+                "scored_at": observation.scored_at.isoformat(),
+            }
+        ).execute()
+        return result.data[0]["id"]
+
+    def get_hawk_dove_scores(
+        self,
+        speaker_name: str | None = None,
+        limit: int = 100,
+        include_insufficient: bool = False,
+    ) -> List[Dict[str, Any]]:
+        query = (
+            self.client.table("hawk_dove_scores")
+            .select("*")
+            .order("speech_date", desc=True)
+            .order("scored_at", desc=True)
+            .limit(limit)
+        )
+        if speaker_name:
+            query = query.eq("speaker_name", speaker_name)
+        if not include_insufficient:
+            query = query.eq("insufficient_policy_content", False)
+        return query.execute().data
+
+    def insert_official_score_snapshot(self, aggregate: "OfficialAggregate", snapshot_key: str | None = None) -> int:
+        if OfficialAggregate is None:
+            raise RuntimeError("hawk_dove.models is not available")
+        key = snapshot_key or f"official_{aggregate.speaker_name}_{aggregate.as_of_date.isoformat()}_{aggregate.method}"
+        existing = self._select_one("official_score_snapshots", snapshot_key=key)
+        if existing:
+            return existing["id"]
+        speaker_id = None
+        if aggregate.speaker_name:
+            speaker_id = self.get_or_create_speaker(aggregate.speaker_name)
+        result = self.client.table("official_score_snapshots").insert(
+            {
+                "snapshot_key": key,
+                "speaker_id": speaker_id,
+                "speaker_name": aggregate.speaker_name,
+                "as_of_date": aggregate.as_of_date.isoformat(),
+                "method": aggregate.method,
+                "window_days": aggregate.window_days,
+                "half_life_days": aggregate.half_life_days,
+                "overall_score": aggregate.overall_score,
+                "inflation_score": aggregate.inflation_score,
+                "labor_score": aggregate.labor_score,
+                "growth_score": aggregate.growth_score,
+                "policy_action_score": aggregate.policy_action_score,
+                "communication_count": aggregate.communication_count,
+                "coverage_notes": aggregate.coverage_notes,
+                "score_keys": aggregate.score_keys,
+            }
+        ).execute()
+        return result.data[0]["id"]
+
+    def insert_committee_score_snapshot(self, aggregate: "CommitteeAggregate", snapshot_key: str | None = None) -> int:
+        if CommitteeAggregate is None:
+            raise RuntimeError("hawk_dove.models is not available")
+        key = snapshot_key or f"committee_{aggregate.cohort}_{aggregate.as_of_date.isoformat()}_{aggregate.method}"
+        existing = self._select_one("committee_score_snapshots", snapshot_key=key)
+        if existing:
+            return existing["id"]
+        result = self.client.table("committee_score_snapshots").insert(
+            {
+                "snapshot_key": key,
+                "as_of_date": aggregate.as_of_date.isoformat(),
+                "cohort": aggregate.cohort,
+                "method": aggregate.method,
+                "window_days": aggregate.window_days,
+                "half_life_days": aggregate.half_life_days,
+                "overall_score": aggregate.overall_score,
+                "official_count": aggregate.official_count,
+                "communication_count": aggregate.communication_count,
+                "coverage_notes": aggregate.coverage_notes,
+                "official_scores": [row.model_dump(mode="json") for row in aggregate.official_scores],
+            }
+        ).execute()
+        return result.data[0]["id"]
 
 
 if __name__ == "__main__":
