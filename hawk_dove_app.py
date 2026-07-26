@@ -26,7 +26,6 @@ from hawk_dove.scoring import HeuristicHawkDoveScorer
 METHOD_MODEL_VERSIONS = {
     "heuristic": "heuristic-hawkdove-v1",
     "roberta": "gtfintechlab/fomc-hawkish-dovish",
-    "anthropic": "claude-sonnet-4-5-20250929",
 }
 
 st.set_page_config(layout="wide", page_title="Fed Hawk–Dove Tracker")
@@ -45,10 +44,6 @@ def build_ui_scorer(method: str, use_hf_roberta: bool):
     """Build a scorer without importing transformers unless explicitly requested."""
     if method == "heuristic":
         return HeuristicHawkDoveScorer()
-    if method == "anthropic":
-        from hawk_dove.registry import get_scorer
-
-        return get_scorer("anthropic")
     # roberta — default to stub so Streamlit does not import transformers on every rerun
     from hawk_dove.roberta import RobertaHawkDoveScorer, StubSentenceClassifier
 
@@ -71,7 +66,7 @@ with st.sidebar:
         "Input",
         ["Curated validation set", "Markdown paste", "Discover URLs", "Stored time series"],
     )
-    method = st.selectbox("Method", ["heuristic", "roberta", "anthropic"], index=0)
+    method = st.selectbox("Method", ["heuristic", "roberta"], index=0)
     use_hf_roberta = False
     if method == "roberta":
         use_hf_roberta = st.checkbox(

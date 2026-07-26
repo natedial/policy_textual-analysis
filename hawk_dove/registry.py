@@ -4,18 +4,12 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Iterable, List
 
-from hawk_dove.scoring import (
-    AnthropicHawkDoveScorer,
-    BaseHawkDoveScorer,
-    HeuristicHawkDoveScorer,
-    default_scorer,
-)
+from hawk_dove.scoring import BaseHawkDoveScorer, HeuristicHawkDoveScorer, default_scorer
 
 METHOD_HEURISTIC = "heuristic"
-METHOD_ANTHROPIC = "anthropic"
 METHOD_ROBERTA = "roberta"
 
-KNOWN_METHODS = (METHOD_HEURISTIC, METHOD_ANTHROPIC, METHOD_ROBERTA)
+KNOWN_METHODS = (METHOD_HEURISTIC, METHOD_ROBERTA)
 
 
 def _build_roberta() -> BaseHawkDoveScorer:
@@ -26,7 +20,6 @@ def _build_roberta() -> BaseHawkDoveScorer:
 
 _FACTORIES: Dict[str, Callable[[], BaseHawkDoveScorer]] = {
     METHOD_HEURISTIC: HeuristicHawkDoveScorer,
-    METHOD_ANTHROPIC: AnthropicHawkDoveScorer,
     METHOD_ROBERTA: _build_roberta,
 }
 
@@ -39,6 +32,11 @@ def get_scorer(method: str | None = None) -> BaseHawkDoveScorer:
     if method is None or method == "default":
         return default_scorer()
     key = method.strip().lower()
+    if key == "anthropic":
+        raise ValueError(
+            "The anthropic/Claude hawk–dove scorer has been removed. "
+            f"Choose from: {', '.join(KNOWN_METHODS)}"
+        )
     if key not in _FACTORIES:
         raise ValueError(f"Unknown scoring method '{method}'. Choose from: {', '.join(KNOWN_METHODS)}")
     return _FACTORIES[key]()

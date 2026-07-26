@@ -1,24 +1,16 @@
-"""Hawk–dove scorers: heuristic fallback and optional Anthropic LLM."""
+"""Hawk–dove scorers: heuristic lexicon baseline (RoBERTa lives in hawk_dove.roberta)."""
 
 from __future__ import annotations
 
-import json
-import os
 import re
-from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from fed_tracker.models import NormalizedDocument
 from hawk_dove.models import HawkDoveEvidence, HawkDoveScoreResult, SectionScore
 
-try:
-    import anthropic
-except ImportError:  # pragma: no cover
-    anthropic = None
-
 
 DEFAULT_PROMPT_VERSION = "hawk_dove_v1"
-DEFAULT_MODEL_VERSION = "claude-sonnet-4-5-20250929"
+DEFAULT_MODEL_VERSION = "heuristic-hawkdove-v1"
 EXTRACTION_VERSION = "v1"
 LONG_DOC_CHAR_THRESHOLD = 24000
 SECTION_CHAR_TARGET = 6000
@@ -346,120 +338,5 @@ class HeuristicHawkDoveScorer(BaseHawkDoveScorer):
         )
 
 
-class AnthropicHawkDoveScorer(BaseHawkDoveScorer):
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model_version: str = DEFAULT_MODEL_VERSION,
-        prompt_path: Optional[str] = None,
-        temperature: float = 0.0,
-    ):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.model_version = model_version
-        self.prompt_version = DEFAULT_PROMPT_VERSION
-        self.prompt_path = Path(
-            prompt_path or Path(__file__).resolve().parent.parent / "prompts" / "hawk_dove_scoring_prompt_v1.txt"
-        )
-        self.model_parameters = {"temperature": temperature, "max_tokens": 2500}
-        if anthropic is None:
-            raise RuntimeError("anthropic package is not installed")
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY must be set to use AnthropicHawkDoveScorer")
-        self.client = anthropic.Anthropic(api_key=self.api_key)
-        self.temperature = temperature
-
-    def score(self, document: NormalizedDocument) -> HawkDoveScoreResult:
-        if not has_monetary_policy_content(document.normalized_text):
-            return HawkDoveScoreResult(
-                overall_score=5.0,
-                inflation_score=5.0,
-                labor_score=5.0,
-                growth_score=5.0,
-                policy_action_score=5.0,
-                confidence=0.2,
-                rationale="Insufficient monetary-policy content for a reliable hawk–dove score.",
-                evidence=[],
-                insufficient_policy_content=True,
-            )
-
-        text = document.normalized_text
-        if len(text) > LONG_DOC_CHAR_THRESHOLD:
-            section_scores: List[SectionScore] = []
-            for section_id, section_text in split_policy_sections(text):
-                mini = document.model_copy(update={"normalized_text": section_text})
-                result = self._score_once(mini)
-                section_scores.append(
-                    SectionScore(
-                        section_id=section_id,
-                        label=section_id,
-                        overall_score=result.overall_score,
-                        inflation_score=result.inflation_score,
-                        labor_score=result.labor_score,
-                        growth_score=result.growth_score,
-                        policy_action_score=result.policy_action_score,
-                        confidence=result.confidence,
-                        rationale=result.rationale,
-                        evidence=result.evidence,
-                    )
-                )
-            return HeuristicHawkDoveScorer()._synthesize_sections(section_scores)
-
-        return self._score_once(document)
-
-    def _score_once(self, document: NormalizedDocument) -> HawkDoveScoreResult:
-        prompt = self.prompt_path.read_text().format(
-            title=document.title or "",
-            speaker_name=document.speaker_name or "",
-            speech_date=document.speech_date.isoformat() if document.speech_date else "",
-            document_type=document.document_type.value if document.document_type else "",
-            speech_text=document.normalized_text,
-        )
-        response = self.client.messages.create(
-            model=self.model_version,
-            max_tokens=2500,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text
-        payload = self._parse_response(raw)
-        evidence = []
-        for item in payload.get("evidence", []):
-            quote = item.get("quote", "")
-            start, end = _find_offsets(document.normalized_text, quote)
-            evidence.append(
-                HawkDoveEvidence(
-                    quote=quote,
-                    direction=item.get("direction", "neutral"),
-                    weight=float(item.get("weight", 0.5)),
-                    start_char=start,
-                    end_char=end,
-                )
-            )
-        return HawkDoveScoreResult(
-            overall_score=float(payload["overall_score"]),
-            inflation_score=float(payload["inflation_score"]),
-            labor_score=float(payload["labor_score"]),
-            growth_score=float(payload["growth_score"]),
-            policy_action_score=float(payload["policy_action_score"]),
-            confidence=float(payload["confidence"]),
-            rationale=str(payload.get("rationale", "")),
-            evidence=evidence,
-            insufficient_policy_content=bool(payload.get("insufficient_policy_content", False)),
-        )
-
-    def _parse_response(self, raw_response: str) -> Dict[str, object]:
-        json_str = raw_response.strip()
-        if "```json" in json_str:
-            json_str = json_str.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif "```" in json_str:
-            json_str = json_str.split("```", 1)[1].split("```", 1)[0].strip()
-        return json.loads(json_str)
-
-
 def default_scorer() -> BaseHawkDoveScorer:
-    if os.getenv("ANTHROPIC_API_KEY"):
-        try:
-            return AnthropicHawkDoveScorer()
-        except Exception:
-            pass
     return HeuristicHawkDoveScorer()
