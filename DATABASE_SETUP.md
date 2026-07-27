@@ -18,7 +18,18 @@ Core tables:
 - `official_score_snapshots`
 - `committee_score_snapshots`
 
-For existing deployments, apply [migrations/001_hawk_dove_layer.sql](migrations/001_hawk_dove_layer.sql) after the base schema.
+For existing deployments, apply [migrations/001_hawk_dove_layer.sql](migrations/001_hawk_dove_layer.sql) after the base schema, then [migrations/002_calendar_ingest_runs.sql](migrations/002_calendar_ingest_runs.sql) for schedule-driven ingest status.
+
+### Calendar project (separate Supabase)
+
+Schedule polling reads `public.speaker_events` from a different Supabase project using:
+
+```bash
+CALENDAR_SUPABASE_URL=https://your-calendar-project.supabase.co
+CALENDAR_SUPABASE_KEY=your-calendar-read-key
+```
+
+Ingest status is written only to the corpus `calendar_ingest_runs` table — the poller does not update calendar `speech_id` / `status`.
 
 ## Supabase Setup
 

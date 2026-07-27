@@ -7,6 +7,7 @@ from hawk_dove.aggregation import (
     aggregate_official,
     ranked_officials,
 )
+from hawk_dove.calendar import CalendarClient, SpeakerEvent, filter_due_events
 from hawk_dove.discovery import discover_new_urls, discover_source_family
 from hawk_dove.export import export_method_comparison, export_observations_csv, export_observations_json, write_bundle
 from hawk_dove.models import CommitteeAggregate, HawkDoveObservation, OfficialAggregate
@@ -17,10 +18,12 @@ from hawk_dove.registry import get_scorer, list_methods
 from hawk_dove.roberta import RobertaHawkDoveScorer
 from hawk_dove.scoring import HeuristicHawkDoveScorer, default_scorer
 from hawk_dove.snapshots import build_snapshot_batch, materialize_snapshots
+from hawk_dove.url_resolve import resolve_event_url
 
 __all__ = [
     "DEFAULT_HALF_LIFE_DAYS",
     "DEFAULT_WINDOW_DAYS",
+    "CalendarClient",
     "CommitteeAggregate",
     "HawkDoveObservation",
     "HawkDovePipeline",
@@ -29,6 +32,7 @@ __all__ = [
     "OfficialAggregate",
     "OfficialsDirectory",
     "RobertaHawkDoveScorer",
+    "SpeakerEvent",
     "aggregate_committee",
     "aggregate_official",
     "build_pipeline",
@@ -40,9 +44,11 @@ __all__ = [
     "export_method_comparison",
     "export_observations_csv",
     "export_observations_json",
+    "filter_due_events",
     "get_scorer",
     "list_methods",
     "materialize_snapshots",
     "ranked_officials",
+    "resolve_event_url",
     "write_bundle",
 ]

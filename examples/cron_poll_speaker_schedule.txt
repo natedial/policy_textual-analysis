@@ -1,0 +1,3 @@
+# Poll calendar speaker_events every 15 minutes and score due speeches.
+# Requires CALENDAR_SUPABASE_* (read) and SUPABASE_* (corpus write) in the environment.
+*/15 * * * * cd /path/to/policy_textual-analysis && ./venv/bin/python poll_speaker_schedule.py --method heuristic >> /var/log/fed_schedule_poller.log 2>&1

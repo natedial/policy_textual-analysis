@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, timedelta
-from typing import Any, Dict, Iterable, List, Optional
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -753,6 +753,64 @@ class Database:
         if method:
             query = query.eq("method", method)
         return query.execute().data
+
+    # ---------------------------------------------------------------------
+    # Calendar ingest runs (corpus-side; calendar project is read-only)
+    # ---------------------------------------------------------------------
+
+    def get_calendar_ingest_run(self, external_id: str) -> Optional[Dict[str, Any]]:
+        return self._select_one("calendar_ingest_runs", external_id=external_id)
+
+    def list_scored_calendar_external_ids(self, external_ids: Sequence[str]) -> set[str]:
+        if not external_ids:
+            return set()
+        result = (
+            self.client.table("calendar_ingest_runs")
+            .select("external_id,status")
+            .in_("external_id", list(external_ids))
+            .execute()
+        )
+        return {
+            row["external_id"]
+            for row in (result.data or [])
+            if row.get("status") == "scored"
+        }
+
+    def upsert_calendar_ingest_run(self, payload: Dict[str, Any]) -> int:
+        external_id = payload["external_id"]
+        existing = self.get_calendar_ingest_run(external_id)
+        now = datetime.now(UTC).isoformat()
+        row = {
+            "external_id": external_id,
+            "calendar_event_id": payload.get("calendar_event_id"),
+            "speaker_name": payload.get("speaker_name"),
+            "title": payload.get("title"),
+            "scheduled_start": payload.get("scheduled_start"),
+            "event_type": payload.get("event_type"),
+            "source": payload.get("source"),
+            "resolved_url": payload.get("resolved_url"),
+            "status": payload.get("status", "pending"),
+            "error": payload.get("error"),
+            "document_key": payload.get("document_key"),
+            "score_key": payload.get("score_key"),
+            "model_version": payload.get("model_version"),
+            "last_attempt_at": payload.get("last_attempt_at") or now,
+            "scored_at": payload.get("scored_at"),
+            "updated_at": now,
+        }
+        if existing:
+            attempt_count = int(existing.get("attempt_count") or 0) + 1
+            result = (
+                self.client.table("calendar_ingest_runs")
+                .update({**row, "attempt_count": attempt_count})
+                .eq("id", existing["id"])
+                .execute()
+            )
+            return result.data[0]["id"]
+        result = self.client.table("calendar_ingest_runs").insert(
+            {**row, "attempt_count": 1}
+        ).execute()
+        return result.data[0]["id"]
 
 
 if __name__ == "__main__":

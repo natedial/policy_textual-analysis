@@ -276,6 +276,20 @@ Validation set (batch via URLs file pattern — score each curated markdown thro
 
 - [examples/hawk_dove/validation_set.json](examples/hawk_dove/validation_set.json)
 
+### Schedule poller (calendar → score)
+
+Reads due rows from a **separate** calendar Supabase project (`public.speaker_events`), resolves speech URLs, scores them into the **corpus** Supabase project, and tracks idempotency in `calendar_ingest_runs` (never writes calendar `speech_id`).
+
+```bash
+# .env needs CALENDAR_SUPABASE_URL / CALENDAR_SUPABASE_KEY plus corpus SUPABASE_*
+python poll_speaker_schedule.py --method heuristic --dry-run
+python poll_speaker_schedule.py --method heuristic
+```
+
+Cron every 15 minutes: [examples/cron_poll_speaker_schedule.txt](examples/cron_poll_speaker_schedule.txt)
+
+Apply [migrations/002_calendar_ingest_runs.sql](migrations/002_calendar_ingest_runs.sql) on the corpus DB (also in [schema.sql](schema.sql)).
+
 ### Discover Board + NY Fed speech links
 
 ```bash
@@ -311,6 +325,7 @@ The schema now supports:
 - `hawk_dove_scores` (append-only)
 - `official_score_snapshots`
 - `committee_score_snapshots`
+- `calendar_ingest_runs` (corpus-side status for calendar-driven pulls)
 
 Setup instructions are in [DATABASE_SETUP.md](DATABASE_SETUP.md).
 
