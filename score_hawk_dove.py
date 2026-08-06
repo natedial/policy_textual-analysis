@@ -64,9 +64,15 @@ def _score_inputs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Score Fed communications on a 0–10 hawk–dove scale (independent research estimates)."
+        description="Score Fed communications on a 0–10 hawk–dove scale (independent research estimates).",
+        allow_abbrev=False,
     )
     parser.add_argument("url", nargs="?", help="Document URL to fetch and score")
+    parser.add_argument(
+        "--url",
+        dest="url_flag",
+        help="Document URL to fetch and score (alternative to positional URL)",
+    )
     parser.add_argument("--urls-file", help="Path to a file containing one URL per line")
     parser.add_argument("--markdown-file", help="Path to a markdown/text file to score")
     parser.add_argument("--metadata-json", help="JSON metadata for markdown scoring")
@@ -105,6 +111,7 @@ def main() -> None:
         help="Comma-separated source families for --discover (default: board,nyfed)",
     )
     args = parser.parse_args()
+    url = args.url_flag or args.url
 
     method = "heuristic" if args.heuristic else args.method
     compare_methods = _parse_methods(args.compare_methods)
@@ -169,9 +176,9 @@ def main() -> None:
         print(json.dumps(cli_envelope(command="score_hawk_dove", data=payload), indent=2))
         return
 
-    has_inputs = bool(args.markdown_file or args.urls_file or args.url)
+    has_inputs = bool(args.markdown_file or args.urls_file or url)
     if not has_inputs and not args.discover:
-        raise SystemExit("A URL, --urls-file, --markdown-file, --discover, or --materialize-from-db is required")
+        raise SystemExit("A URL, --url, --urls-file, --markdown-file, --discover, or --materialize-from-db is required")
 
     methods_to_run = compare_methods or ([method] if has_inputs else [])
     comparisons: Dict[str, List[Any]] = {}
@@ -182,7 +189,7 @@ def main() -> None:
         pipeline = HawkDovePipeline(scorer=scorer, officials=officials, database=database)
         scored = _score_inputs(
             pipeline,
-            url=args.url,
+            url=url,
             urls_file=args.urls_file,
             markdown_file=args.markdown_file,
             metadata=metadata,
