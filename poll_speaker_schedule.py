@@ -78,8 +78,11 @@ def process_event(
         return result
 
     if not resolved_url:
-        result["status"] = "failed"
+        # Remarks often publish after the event; keep retryable (not a hard fail).
+        result["status"] = "pending_url"
         result["error"] = "no_url_resolved"
+        if event.url:
+            result["rejected_calendar_url"] = event.url
         if corpus_db is not None and not dry_run:
             corpus_db.upsert_calendar_ingest_run(
                 {
@@ -90,7 +93,8 @@ def process_event(
                     "scheduled_start": event.scheduled_start.isoformat(),
                     "event_type": event.event_type,
                     "source": event.source,
-                    "status": "failed",
+                    "resolved_url": event.url,
+                    "status": "pending_url",
                     "error": result["error"],
                 }
             )
@@ -268,6 +272,7 @@ def run_poll(
         "due_count": len(results),
         "scored": sum(1 for row in results if row["status"] == "scored"),
         "failed": sum(1 for row in results if row["status"] == "failed"),
+        "pending_url": sum(1 for row in results if row["status"] == "pending_url"),
         "skipped": sum(1 for row in results if str(row["status"]).startswith("skipped")),
         "dry_run": dry_run,
         "method": method,

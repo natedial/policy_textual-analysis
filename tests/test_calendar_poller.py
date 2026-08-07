@@ -9,7 +9,11 @@ from hawk_dove.calendar import (
     speaker_event_from_row,
 )
 from hawk_dove.discovery import DiscoveredDocument
-from hawk_dove.url_resolve import resolve_event_url
+from hawk_dove.url_resolve import (
+    is_published_speech_url,
+    is_rejected_event_url,
+    resolve_event_url,
+)
 from poll_speaker_schedule import process_event, run_poll
 
 
@@ -68,11 +72,56 @@ class CalendarFilterTests(unittest.TestCase):
         self.assertEqual(len(due), 1)
 
 
+class UrlQualityTests(unittest.TestCase):
+    def test_accepts_board_speech_urls(self):
+        url = "https://www.federalreserve.gov/newsevents/speech/powell20250618a.htm"
+        self.assertTrue(is_published_speech_url(url))
+        self.assertFalse(is_rejected_event_url(url))
+
+    def test_rejects_livestream_and_registration_hosts(self):
+        bad = [
+            "https://zoom.us/meeting/register/HwGA9SMaQu-vrt_YA2ZJaw",
+            "https://onemetlife.webex.com/onemetlife/j.php?MTID=mbbedc1dd8ba1351aa71d43af74b7592a",
+            "https://www.youtube.com/watch?v=OFTWSRRkkCU",
+            "https://www.federalreserve.gov/live-broadcast.htm",
+            "https://financialservices.house.gov",
+            "https://www.banking.senate.gov",
+        ]
+        for url in bad:
+            self.assertTrue(is_rejected_event_url(url), url)
+            self.assertFalse(is_published_speech_url(url), url)
+
+    def test_rejects_conference_pages_as_published_speech(self):
+        url = "https://www.federalreserve.gov/conferences/next-gen-financial-inclusion.htm"
+        self.assertFalse(is_published_speech_url(url))
+
+
 class UrlResolveTests(unittest.TestCase):
     def test_prefers_event_url(self):
         event = speaker_event_from_row(_row())
         url = resolve_event_url(event, discovered=[])
         self.assertIn("powell20250618a", url)
+
+    def test_junk_calendar_url_falls_through_to_discovery(self):
+        event = speaker_event_from_row(
+            _row(url="https://zoom.us/meeting/register/abc123")
+        )
+        discovered = [
+            DiscoveredDocument(
+                url="https://www.federalreserve.gov/newsevents/speech/powell20250618a.htm",
+                source_family="board",
+                title="Chair Powell Speech",
+                date_hint=event.scheduled_date,
+            )
+        ]
+        url = resolve_event_url(event, discovered=discovered)
+        self.assertIn("powell20250618a", url)
+
+    def test_junk_calendar_url_without_discovery_returns_none(self):
+        event = speaker_event_from_row(
+            _row(url="https://www.youtube.com/watch?v=OFTWSRRkkCU")
+        )
+        self.assertIsNone(resolve_event_url(event, discovered=[]))
 
     def test_discovery_fallback_matches_speaker_and_date(self):
         event = speaker_event_from_row(_row(url=None))
@@ -118,6 +167,23 @@ class PollerTests(unittest.TestCase):
         self.assertEqual(result["status"], "dry_run_would_score")
         pipeline.score_document.assert_not_called()
 
+    def test_pending_url_when_unresolved(self):
+        event = speaker_event_from_row(
+            _row(url="https://zoom.us/meeting/register/abc123")
+        )
+        corpus = MagicMock()
+        corpus.get_calendar_ingest_run.return_value = None
+        pipeline = MagicMock()
+        with patch("poll_speaker_schedule.resolve_event_url", return_value=None):
+            result = process_event(event, pipeline=pipeline, corpus_db=corpus, dry_run=False)
+        self.assertEqual(result["status"], "pending_url")
+        self.assertEqual(result["error"], "no_url_resolved")
+        self.assertEqual(result["rejected_calendar_url"], event.url)
+        pipeline.score_document.assert_not_called()
+        corpus.upsert_calendar_ingest_run.assert_called_once()
+        payload = corpus.upsert_calendar_ingest_run.call_args.args[0]
+        self.assertEqual(payload["status"], "pending_url")
+
     def test_run_poll_with_injected_events_filters_scored(self):
         now = datetime(2025, 6, 18, 16, 0, tzinfo=timezone.utc)
         events = [
@@ -138,10 +204,11 @@ class PollerTests(unittest.TestCase):
                 dry_run=True,
                 corpus_db=corpus,
             )
-        # "a" filtered as already scored; "b" remains and fails URL in dry-run path after filter...
-        # dry_run with no url => failed no_url_resolved
+        # "a" filtered as already scored; "b" remains pending_url
         self.assertEqual(summary["due_count"], 1)
         self.assertEqual(summary["results"][0]["external_id"], "b")
+        self.assertEqual(summary["results"][0]["status"], "pending_url")
+        self.assertEqual(summary["pending_url"], 1)
 
 
 if __name__ == "__main__":
