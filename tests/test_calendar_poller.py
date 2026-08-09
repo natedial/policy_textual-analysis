@@ -123,6 +123,53 @@ class UrlResolveTests(unittest.TestCase):
         )
         self.assertIsNone(resolve_event_url(event, discovered=[]))
 
+    def test_unnamed_press_conference_does_not_match_archival_speech(self):
+        event = speaker_event_from_row(
+            _row(
+                speaker_name=None,
+                title="FOMC Press Conference",
+                event_type="press_conference",
+                url="https://www.federalreserve.gov/live-broadcast.htm",
+                scheduled_start="2026-07-29T18:30:00+00:00",
+            )
+        )
+        discovered = [
+            DiscoveredDocument(
+                url="https://www.newyorkfed.org/newsevents/speeches/1996/ep960125",
+                source_family="nyfed",
+                title="Archival remarks",
+                date_hint=None,
+            ),
+            DiscoveredDocument(
+                url="https://www.federalreserve.gov/newsevents/speech/powell20250618a.htm",
+                source_family="board",
+                title="Chair Powell Speech",
+                date_hint=event.scheduled_date,
+            ),
+        ]
+        self.assertIsNone(resolve_event_url(event, discovered=discovered))
+
+    def test_unnamed_press_conference_matches_dated_pc_transcript(self):
+        event = speaker_event_from_row(
+            _row(
+                speaker_name=None,
+                title="FOMC Press Conference",
+                event_type="press_conference",
+                url=None,
+                scheduled_start="2026-07-29T18:30:00+00:00",
+            )
+        )
+        discovered = [
+            DiscoveredDocument(
+                url="https://www.federalreserve.gov/newsevents/pressconferences/fomcpresconf20260729.htm",
+                source_family="board",
+                title="FOMC Press Conference",
+                date_hint=event.scheduled_date,
+            )
+        ]
+        url = resolve_event_url(event, discovered=discovered)
+        self.assertIn("pressconferences", url)
+
     def test_discovery_fallback_matches_speaker_and_date(self):
         event = speaker_event_from_row(_row(url=None))
         discovered = [

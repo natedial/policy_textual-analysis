@@ -102,15 +102,24 @@ def is_published_speech_url(url: str) -> bool:
     return False
 
 
+def _is_press_conference_doc(item: DiscoveredDocument) -> bool:
+    haystack = " ".join(filter(None, [item.url, item.title or ""])).lower()
+    return "pressconference" in haystack.replace("_", "").replace("-", "") or "press conference" in haystack
+
+
 def _speaker_match(event: SpeakerEvent, item: DiscoveredDocument) -> bool:
+    """Match speaker; unnamed events only match press-conference docs for PC types."""
     if not event.speaker_name:
-        return True
+        event_type = (event.event_type or "").lower()
+        if event_type in {"press_conference", "statement"}:
+            return _is_press_conference_doc(item)
+        return False
     speaker_tokens = _tokens(event.speaker_name)
     haystacks = " ".join(
         filter(None, [item.title or "", item.url, item.speaker_hint or ""])
     ).lower()
     if not speaker_tokens:
-        return True
+        return False
     # Require last-name style token hit when available.
     last = event.speaker_name.split()[-1].lower().strip(".")
     if last and last in haystacks:
@@ -119,9 +128,19 @@ def _speaker_match(event: SpeakerEvent, item: DiscoveredDocument) -> bool:
 
 
 def _date_close(item: DiscoveredDocument, target: date, slack_days: int = 2) -> bool:
+    # Undated discovery hits are too risky (e.g. archival 1990s NY Fed pages).
     if item.date_hint is None:
-        return True
+        return False
     return abs((item.date_hint - target).days) <= slack_days
+
+
+def _event_type_compatible(event: SpeakerEvent, item: DiscoveredDocument) -> bool:
+    event_type = (event.event_type or "").lower()
+    if event_type == "press_conference":
+        return _is_press_conference_doc(item)
+    if event_type in {"speech", "remarks", "prepared_remarks", "interview", "testimony"}:
+        return not _is_press_conference_doc(item)
+    return True
 
 
 def _best_discovery_match(
@@ -135,27 +154,27 @@ def _best_discovery_match(
         item
         for item in candidates
         if is_published_speech_url(item.url)
+        and _event_type_compatible(event, item)
         and _speaker_match(event, item)
         and _date_close(item, target_date, slack_days=slack_days)
     ]
-    if not matches:
-        # Loosen date if speaker matches strongly.
+    if not matches and event.speaker_name:
+        # Loosen date slightly when speaker matches; still require a date_hint.
+        loose_days = max(slack_days, 5)
         matches = [
             item
             for item in candidates
-            if is_published_speech_url(item.url) and _speaker_match(event, item)
-        ]
-        matches = [
-            item
-            for item in matches
-            if item.date_hint is None
-            or abs((item.date_hint - target_date).days) <= max(slack_days, 5)
+            if is_published_speech_url(item.url)
+            and _event_type_compatible(event, item)
+            and _speaker_match(event, item)
+            and item.date_hint is not None
+            and abs((item.date_hint - target_date).days) <= loose_days
         ]
     if not matches:
         return None
 
     def sort_key(item: DiscoveredDocument):
-        date_delta = 0 if item.date_hint is None else abs((item.date_hint - target_date).days)
+        date_delta = abs((item.date_hint - target_date).days)  # type: ignore[operator]
         return (date_delta, item.url)
 
     matches.sort(key=sort_key)
