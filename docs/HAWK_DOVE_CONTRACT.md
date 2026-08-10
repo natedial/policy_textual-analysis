@@ -84,8 +84,7 @@ Swappable via `hawk_dove.registry.get_scorer` / CLI `--method`:
 
 | Method | `model_version` | Notes |
 |--------|-----------------|-------|
-| `heuristic` | `heuristic-hawkdove-v1` | Lexicon baseline |
-| `anthropic` | Claude model id | Rubric LLM scorer |
+| `heuristic` | `heuristic-hawkdove-v1` | Lexicon baseline (default) |
 | `roberta` | `gtfintechlab/fomc-hawkish-dovish` | Sentence classifier baseline; component scores are keyword-routed, not native heads |
 
 Use `--compare-methods heuristic,roberta` for side-by-side export.

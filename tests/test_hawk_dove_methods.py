@@ -66,8 +66,12 @@ class RegistryTests(unittest.TestCase):
     def test_list_methods(self):
         methods = list_methods()
         self.assertIn("heuristic", methods)
-        self.assertIn("anthropic", methods)
         self.assertIn("roberta", methods)
+        self.assertNotIn("anthropic", methods)
+
+    def test_anthropic_removed(self):
+        with self.assertRaises(ValueError):
+            get_scorer("anthropic")
 
     def test_get_heuristic(self):
         scorer = get_scorer("heuristic")

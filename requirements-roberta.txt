@@ -1,4 +1,8 @@
 # Optional ML dependencies for RoBERTa hawk–dove baseline scoring.
 # Core install remains: pip install -r requirements.txt
+#
+# torchvision is required so Streamlit's module watcher does not crash when it
+# probes transformers' vision model submodules after `transformers` is imported.
 transformers>=4.40.0
 torch>=2.2.0
+torchvision>=0.17.0
