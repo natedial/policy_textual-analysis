@@ -9,6 +9,8 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
+
 from fed_tracker.contract import cli_envelope
 from fed_tracker.normalization import normalize_url
 from hawk_dove.calendar import (
@@ -24,6 +26,8 @@ from hawk_dove.pipeline import HawkDovePipeline
 from hawk_dove.registry import get_scorer
 from hawk_dove.snapshots import materialize_snapshots
 from hawk_dove.url_resolve import resolve_event_url
+
+load_dotenv()
 
 
 def _parse_hours(value: float) -> timedelta:

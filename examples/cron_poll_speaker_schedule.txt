@@ -1,3 +1,25 @@
-# Poll calendar speaker_events every 15 minutes and score due speeches.
-# Requires CALENDAR_SUPABASE_* (read) and SUPABASE_* (corpus write) in the environment.
-*/15 * * * * cd /path/to/policy_textual-analysis && ./venv/bin/python poll_speaker_schedule.py --method heuristic >> /var/log/fed_schedule_poller.log 2>&1
+# Cron template: poll calendar speaker_events every 15 minutes.
+#
+# Prerequisites
+# - Repo checked out on this machine
+# - venv with requirements installed
+# - .env in the repo root with:
+#     SUPABASE_URL / SUPABASE_KEY                         (corpus write)
+#     CALENDAR_SUPABASE_URL / CALENDAR_SUPABASE_KEY       (speaker_events read)
+# - Create the log directory first, e.g. mkdir -p /path/to/policy_textual-analysis/logs
+#
+# Behavior (defaults are intentional for cron):
+# - Window: lookback 6h / lookahead 2h
+# - Types: speech, remarks, testimony, prepared_remarks, press_conference, interview, statement
+# - Rejects Zoom/WebEx/YouTube/live-broadcast shells; leaves pending_url until a published Fed page exists
+# - poll_speaker_schedule.py loads .env via python-dotenv when cwd is the repo root
+#
+# Replace /path/to/policy_textual-analysis with your real repo path before installing.
+
+*/15 * * * * cd /path/to/policy_textual-analysis && ./venv/bin/python poll_speaker_schedule.py --method heuristic >> /path/to/policy_textual-analysis/logs/fed_schedule_poller.log 2>&1
+
+# Optional overlap guard (recommended if discovery/network is slow):
+# */15 * * * * cd /path/to/policy_textual-analysis && /usr/bin/flock -n /tmp/fed_schedule_poller.lock ./venv/bin/python poll_speaker_schedule.py --method heuristic >> /path/to/policy_textual-analysis/logs/fed_schedule_poller.log 2>&1
+#
+# One-time backfill (manual, not for cron):
+# cd /path/to/policy_textual-analysis && ./venv/bin/python poll_speaker_schedule.py --method heuristic --lookback-hours 720 --lookahead-hours 336
